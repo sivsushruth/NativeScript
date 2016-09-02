@@ -150,12 +150,16 @@ export class View extends viewCommon.View {
         }
     }
 
-    public _addViewCore(view: viewCommon.View, atIndex?: number) {
+    public _addViewCore(view: View, atIndex?: number) {
         if (this._context) {
             view._onAttached(this._context);
         }
 
         super._addViewCore(view, atIndex);
+
+        if (this._context) {
+            view._onAfterAttached();
+        }
     }
 
     public _removeViewCore(view: viewCommon.View) {
@@ -195,10 +199,22 @@ export class View extends viewCommon.View {
                     // since we have lazy loading of the android widgets, we need to add the native instances at this point.
                     child._isAddedToNativeVisualTree = that._addViewToNativeVisualTree(child);
                 }
+                child._onAfterAttached();
+
                 return true;
             }
             this._eachChildView(eachChild);
         }
+    }
+
+    /**
+     * Syncs native properties and raises _onContextChanged after _onAttached call.
+     * Lets us add the native view to the native visual tree so that its LayoutParams
+     * can be properly initialized by its parent before we sync the native properties.
+     */
+    private _onAfterAttached() {
+        this._syncNativeProperties();
+        trace.notifyEvent(this, "_onContextChanged");
     }
 
     public _onDetached(force?: boolean) {
@@ -260,8 +276,6 @@ export class View extends viewCommon.View {
         padding = this.style.paddingTop;
         padding = this.style.paddingRight;
         padding = this.style.paddingBottom;
-        this._syncNativeProperties();
-        trace.notifyEvent(this, "_onContextChanged");
     }
 
     get _nativeView(): android.view.View {

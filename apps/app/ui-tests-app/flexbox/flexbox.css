@@ -18,3 +18,11 @@
     animation-fill-mode: forwards;
     animation-iteration-count: 1;
 }
+
+.control {
+    font-size: 11;
+}
+.control Button {
+    padding: 2;
+    margin: 2;
+}

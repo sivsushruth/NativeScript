@@ -1,3 +1,4 @@
+import {isAndroid} from "platform";
 import * as flexbox from "ui/layouts/flexbox-layout";
 
 function set(what: string) {
@@ -17,12 +18,20 @@ export function select(args) {
     if (lastSelection) {
         lastSelection.selected = "no";
         lastSelection.notify({ eventName: "selectedChange" });
+        lastSelection.page.bindingContext = null;
     }
     console.log("Select: " + args.object);
     lastSelection = args.object;
     if (lastSelection) {
         lastSelection.selected = "yes";
         lastSelection.notify({ eventName: "selectedChange" });
+        lastSelection.page.bindingContext = lastSelection;
+    }
+
+    if (isAndroid) {
+        let layoutParams = lastSelection.android.getLayoutParams();
+        console.log("Selection: " + lastSelection + ": " + layoutParams);
+        console.log(" - margin: " + layoutParams.topMargin + " " + layoutParams.rightMargin + " " + layoutParams.bottomMargin + " " + layoutParams.leftMargin);
     }
 }
 
