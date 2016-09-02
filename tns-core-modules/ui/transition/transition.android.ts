@@ -7,6 +7,27 @@ import * as animationModule from "ui/animation";
 import lazy from "utils/lazy";
 import trace = require("trace");
 
+let idleGCHandler;
+let scheduledGC = false;
+function scheduleGCOnIdle() {
+    if (!idleGCHandler) {
+        idleGCHandler = new android.os.MessageQueue.IdleHandler({
+            queueIdle: function () {
+                gc();
+                scheduledGC = false;
+                return false;
+            }
+        });
+    }
+
+    if (!scheduledGC) {
+        android.os.Looper.myQueue().addIdleHandler(idleGCHandler);
+        scheduledGC = true;
+    }
+
+    return idleGCHandler;
+}
+
 let slideTransition: any;
 function ensureSlideTransition() {
     if (!slideTransition) {
@@ -402,6 +423,8 @@ function _completePageRemoval(fragment: any, isBack: boolean) {
     }
 
     entry.isNavigation = undefined;
+
+    scheduleGCOnIdle();
 }
 
 export function _removePageNativeViewFromAndroidParent(page: Page): void {
@@ -422,55 +445,72 @@ function _toShortString(nativeTransition: any): string {
 }
 
 function _addNativeTransitionListener(fragment: any, nativeTransition: any/*android.transition.Transition*/) {
-    let expandedFragmentRef = new WeakRef(<ExpandedFragment>fragment);
-    let nativeTransitionRef = new WeakRef(nativeTransition);
     let transitionListener = new (<any>android).transition.Transition.TransitionListener({
         onTransitionCancel: function (transition: any): void {
-            let expandedFragment = expandedFragmentRef.get();
+            let expandedFragment = this.fragment;
             if (!expandedFragment) {
                 return;
             }
             if (trace.enabled) {
-                trace.write(`CANCEL ${_toShortString(nativeTransitionRef.get())} transition for ${fragment}`, trace.categories.Transition);
+                trace.write(`CANCEL ${_toShortString(transition)} transition for ${expandedFragment}`, trace.categories.Transition);
             }
             if ( expandedFragment.completePageRemovalWhenTransitionEnds) {
-                _completePageRemoval(fragment, expandedFragment.completePageRemovalWhenTransitionEnds.isBack);
+                _completePageRemoval(expandedFragment, expandedFragment.completePageRemovalWhenTransitionEnds.isBack);
             }
             if (expandedFragment.completePageAdditionWhenTransitionEnds) {
-                _completePageAddition(fragment, expandedFragment.completePageAdditionWhenTransitionEnds.isBack);
+                _completePageAddition(expandedFragment, expandedFragment.completePageAdditionWhenTransitionEnds.isBack);
+            }
+
+            if (this.fragment) {
+                transition.removeListener(this.listener);
+                this.fragment = null;
+                this.listener = null;
             }
         },
         onTransitionEnd: function (transition: any): void {
-            let expandedFragment = expandedFragmentRef.get();
+            let expandedFragment = this.fragment;
             if (!expandedFragment) {
                 return;
             }
             if (trace.enabled) {
-                trace.write(`END ${_toShortString(nativeTransitionRef.get())} transition for ${fragment}`, trace.categories.Transition);
+                trace.write(`END ${_toShortString(transition)} transition for ${expandedFragment}`, trace.categories.Transition);
             }
             if (expandedFragment.completePageRemovalWhenTransitionEnds) {
-                _completePageRemoval(fragment, expandedFragment.completePageRemovalWhenTransitionEnds.isBack);
+                _completePageRemoval(expandedFragment, expandedFragment.completePageRemovalWhenTransitionEnds.isBack);
             }
             if (expandedFragment.completePageAdditionWhenTransitionEnds) {
-                _completePageAddition(fragment, expandedFragment.completePageAdditionWhenTransitionEnds.isBack);
+                _completePageAddition(expandedFragment, expandedFragment.completePageAdditionWhenTransitionEnds.isBack);
+            }
+
+            if (this.fragment) {
+                transition.removeListener(this.listener);
+                this.fragment = null;
+                this.listener = null;
             }
         },
         onTransitionPause: function (transition: any): void {
+            let expandedFragment = this.fragment;
             if (trace.enabled) {
-                trace.write(`PAUSE ${_toShortString(nativeTransitionRef.get())} transition for ${fragment}`, trace.categories.Transition);
+                trace.write(`PAUSE ${_toShortString(transition)} transition for ${expandedFragment}`, trace.categories.Transition);
             }
         },
         onTransitionResume: function (transition: any): void {
+            let expandedFragment = this.fragment;
             if (trace.enabled) {
-                trace.write(`RESUME ${_toShortString(nativeTransitionRef.get())} transition for ${fragment}`, trace.categories.Transition);
+                trace.write(`RESUME ${_toShortString(transition)} transition for ${expandedFragment}`, trace.categories.Transition);
             }
         },
         onTransitionStart: function (transition: any): void {
+            let expandedFragment = this.fragment;
             if (trace.enabled) {
-                trace.write(`START ${_toShortString(nativeTransitionRef.get())} transition for ${fragment}`, trace.categories.Transition);
+                trace.write(`START ${_toShortString(transition)} transition for ${expandedFragment}`, trace.categories.Transition);
             }
         }
     });
+
+    transitionListener.fragment = fragment;
+    transitionListener.listener = transitionListener;
+
     nativeTransition.addListener(transitionListener);
 }
 
@@ -510,57 +550,63 @@ export function _onFragmentCreateAnimator(fragment: ExpandedFragment, nextAnim: 
         animator = <android.animation.Animator>transition.createAndroidAnimator(transitionType);
         trace.write(`${transition}.createAndroidAnimator(${transitionType}): ${animator}`, trace.categories.Transition);
 
-        let transitionRef = new WeakRef(transition);
-        let fragmentRef = new WeakRef(fragment);
-
         let transitionListener = new android.animation.Animator.AnimatorListener({
             onAnimationStart: function (animator: android.animation.Animator): void {
                 if (trace.enabled) {
-                    trace.write(`START ${transitionType} ${transitionRef.get()} for ${fragmentRef.get()}`, trace.categories.Transition);
+                    trace.write(`START ${transitionType} ${this.transition} for ${this.fragment}`, trace.categories.Transition);
                 }
             },
             onAnimationRepeat: function (animator: android.animation.Animator): void {
                 if (trace.enabled) {
-                    trace.write(`REPEAT ${transitionType} ${transitionRef.get()} for ${fragmentRef.get()}`, trace.categories.Transition);
+                    trace.write(`REPEAT ${transitionType} ${this.transition} for ${this.fragment}`, trace.categories.Transition);
                 }
             },
             onAnimationEnd: function (animator: android.animation.Animator): void {
-                let fragmentValue = fragmentRef.get();
-                if (!fragmentValue) {
-                    return;
-                }
-
                 if (trace.enabled) {
-                    trace.write(`END ${transitionType} ${transitionRef.get()} for ${fragmentValue}`, trace.categories.Transition);
+                    trace.write(`END ${transitionType} ${this.transition} for ${this.fragment}`, trace.categories.Transition);
                 }
 
-                if (fragmentValue.completePageRemovalWhenTransitionEnds) {
-                    _completePageRemoval(fragmentValue, fragmentValue.completePageRemovalWhenTransitionEnds.isBack);
+                if (this.fragment.completePageRemovalWhenTransitionEnds) {
+                    _completePageRemoval(this.fragment, this.fragment.completePageRemovalWhenTransitionEnds.isBack);
                 }
 
-                if (fragmentValue.completePageAdditionWhenTransitionEnds) {
-                    _completePageAddition(fragmentValue, fragmentValue.completePageAdditionWhenTransitionEnds.isBack);
+                if (this.fragment.completePageAdditionWhenTransitionEnds) {
+                    _completePageAddition(this.fragment, this.fragment.completePageAdditionWhenTransitionEnds.isBack);
+                }
+
+                if (this.fragment) {
+                    animator.removeListener(this.listener);
+                    this.fragment = null;
+                    this.listener = null;
+                    this.transition = null;
                 }
             },
             onAnimationCancel: function (animator: android.animation.Animator): void {
-                let fragmentValue = fragmentRef.get();
-                if (!fragmentValue) {
-                    return;
-                }
-
                 if (trace.enabled) {
-                    trace.write(`CANCEL ${transitionType} ${transitionRef.get()} for ${fragmentValue}`, trace.categories.Transition);
+                    trace.write(`CANCEL ${transitionType} ${this.transition} for ${this.fragment}`, trace.categories.Transition);
                 }
 
-                if (fragmentValue.completePageRemovalWhenTransitionEnds) {
-                    _completePageRemoval(fragmentValue, fragmentValue.completePageRemovalWhenTransitionEnds.isBack);
+                if (this.fragment.completePageRemovalWhenTransitionEnds) {
+                    _completePageRemoval(this.fragment, this.fragment.completePageRemovalWhenTransitionEnds.isBack);
                 }
 
-                if (fragmentValue.completePageAdditionWhenTransitionEnds) {
-                    _completePageAddition(fragmentValue, fragmentValue.completePageAdditionWhenTransitionEnds.isBack);
+                if (this.fragment.completePageAdditionWhenTransitionEnds) {
+                    _completePageAddition(this.fragment, this.fragment.completePageAdditionWhenTransitionEnds.isBack);
+                }
+
+                if (this.fragment) {
+                    animator.removeListener(this.listener);
+                    this.fragment = null;
+                    this.listener = null;
+                    this.transition = null;
                 }
             }
         });
+
+        (<any>transitionListener).fragment = fragment;
+        (<any>transitionListener).listener = transitionListener;
+        (<any>transitionListener).transition = transition;
+
         animator.addListener(transitionListener);
     }
 
